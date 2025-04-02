@@ -1,0 +1,724 @@
+Program Listing
+'************************************************
+'*
+PROGRAM MESHGEN
+*
+'* MESH GENERATOR FOR TWO DIMENSIONAL REGIONS *
+'*
+(c) T.R.CHANDRUPATLA & A.D.BELEGUNDU
+*
+'************************************************
+Private Sub cmdEnd_Click()
+End
+End Sub
+‘===== MAIN PROGRAM ======
+Private Sub cmdStart_Click()
+Call InputData
+Call GlobalNode
+Call CoordConnect
+Call Output
+cmdView.Enabled = True
+cmdStart.Enabled = False
+End Sub
+‘==============================
+‘===== INPUT DATA FROM FILE ======
+Private Sub InputData()
+File1 = InputBox("Input File d:\dir\fileName.ext", "Name of File")
+Open File1 For Input As #1Program Listing
+'============= READ DATA ===============
+Line Input #1, Dummy: Line Input #1, Title
+Line Input #1, Dummy
+Input #1, NEN
+' NEN = 3 for Triangle 4 for Quad
+If NEN < 3 Then NEN = 3
+If NEN > 4 Then NEN = 4
+'Hints: A region is divided into 4-cornered blocks viewed as a
+'
+mapping from a Checkerboard pattern of S- and W- Sides
+'
+S- Side is one with lower number of final divisions
+'
+Blocks, Corners, S- and W- Sides are labeled as shown in Fig. 12.2
+'
+Make a sketch and identify void blocks and merging sides
+'----- Block Data -----
+'#S-Spans(NS) #W-Spans(NW) #PairsOfEdgesMerged(NSJ)
+Line Input #1, Dummy: Line Input #1, Dummy
+Input #1, NS, NW, NSJ
+NSW = NS * NW: NGN = (NS + 1) * (NW + 1): NM = 1
+ReDim IDBLK(NSW), NSD(NS), NWD(NW), NGCN(NGN), SH(8)
+'------------- Span Divisions ---------------
+Line Input #1, Dummy
+NNS = 1: NNW = 1
+'--- Number of divisions for each S-Span
+Line Input #1, Dummy
+For KS = 1 To NS
+Input #1, N
+Input #1, NSD(N)
+NNS = NNS + NSD(N)
+Next KS
+'--- Number of divisions for each W-Span
+Line Input #1, Dummy
+For KW = 1 To NW
+Input #1, N
+Input #1, NWD(N)
+NNW = NNW + NWD(N)
+Next KW
+'--- Block Material Data
+Input #1, Dummy: Input #1, Dummy
+'-------- Block Identifier / Material# (Default# is 1) --------
+For I = 1 To NSW: IDBLK(I) = 1: Next I
+Do
+Input #1, NTMP
+If NTMP = 0 Then Exit Do
+Input #1, IDBLK(NTMP)
+If NM < IDBLK(NTMP) Then NM = IDBLK(NTMP)
+Loop
+'-----------------
+Block Corner Data ---------------
+NSR = NS * (NW + 1): NWR = NW * (NS + 1)
+ReDim XB(NGN, 2), SR(NSR, 2), WR(NWR, 2)
+Input #1, Dummy: Input #1, Dummy
+Do
+Input #1, NTMP
+If NTMP = 0 Then Exit Do
+Input #1, XB(NTMP, 1)
+Input #1, XB(NTMP, 2)
+Loop
+487488
+Chapter 12
+Preprocessing and Postprocessing
+continued
+'---------- Evaluate Mid-points of S-Sides -------------
+For I = 1 To NW + 1
+For J = 1 To NS
+IJ = (I - 1) * NS + J
+SR(IJ, 1) = 0.5 * (XB(IJ + I - 1, 1) + XB(IJ + I, 1))
+SR(IJ, 2) = 0.5 * (XB(IJ + I - 1, 2) + XB(IJ + I, 2))
+Next J
+Next I
+'---------- Evaluate Mid-points of W-Sides -------------
+For I = 1 To NW
+For J = 1 To NS + 1
+IJ = (I - 1) * (NS + 1) + J
+WR(IJ, 1) = 0.5 * (XB(IJ, 1) + XB(IJ + NS + 1, 1))
+WR(IJ, 2) = 0.5 * (XB(IJ, 2) + XB(IJ + NS + 1, 2))
+Next J
+Next I
+'------ Mid Points for Sides that are curved or graded ------
+Line Input #1, Dummy: Line Input #1, Dummy
+'--- S-Sides
+Do
+Input #1, NTMP
+If NTMP = 0 Then Exit Do
+Input #1, SR(NTMP, 1)
+Input #1, SR(NTMP, 2)
+Loop
+Line Input #1, Dummy
+'--- W-Sides
+Do
+Input #1, NTMP
+If NTMP = 0 Then Exit Do
+Input #1, WR(NTMP, 1)
+Input #1, WR(NTMP, 2)
+Loop
+'--------- Merging Sides ----------
+If NSJ > 0 Then
+Input #1, Dummy: Input #1, Dummy
+ReDim MERG(NSJ, 4)
+For I = 1 To NSJ
+Input #1, N
+Input #1, L1
+Input #1, L2
+Call SideDiv(L1, L2, IDIV1)
+Input #1, L3
+Input #1, L4
+Call SideDiv(L3, L4, IDIV2)
+If IDIV1 <> IDIV2 Then
+picBox.Print "#Div don't match. Check merge data."
+End
+End If
+MERG(I, 1) = L1: MERG(I, 2) = L2
+MERG(I, 3) = L3: MERG(I, 4) = L4
+Next I
+End If
+Close #1
+End Sub
+‘========================================================Program Listing
+‘===== GLOBAL NODE NUMBERS FOR THE MESH ======
+Private Sub GlobalNode()
+'------- Global Node Locations of Corner Nodes ---------
+NTMPI = 1
+For I = 1 To NW + 1
+If I = 1 Then IINC = 0 Else IINC = NNS * NWD(I - 1)
+NTMPI = NTMPI + IINC: NTMPJ = 0
+For J = 1 To NS + 1
+IJ = (NS + 1) * (I - 1) + J
+If J = 1 Then JINC = 0 Else JINC = NSD(J - 1)
+NTMPJ = NTMPJ + JINC: NGCN(IJ) = NTMPI + NTMPJ
+Next J
+Next I
+'---------------- Node Point Array --------------------
+NNT = NNS * NNW
+ReDim NNAR(NNT)
+For I = 1 To NNT: NNAR(I) = -1: Next I
+'--------- Zero Non-Existing Node Locations ---------
+For KW = 1 To NW
+For KS = 1 To NS
+KSW = NS * (KW - 1) + KS
+If IDBLK(KSW) <= 0 Then
+'-------- Operation within an Empty Block --------
+K1 = (KW - 1) * (NS + 1) + KS: N1 = NGCN(K1)
+NS1 = 2: If KS = 1 Then NS1 = 1
+NW1 = 2: If KW = 1 Then NW1 = 1
+NS2 = NSD(KS) + 1
+If KS < NS Then
+If IDBLK(KSW + 1) > 0 Then NS2 = NSD(KS)
+End If
+NW2 = NWD(KW) + 1
+If KW < NW Then
+If IDBLK(KSW + NS) > 0 Then NW2 = NWD(KW)
+End If
+For I = NW1 To NW2
+IN1 = N1 + (I - 1) * NNS
+For J = NS1 To NS2
+IJ = IN1 + J – 1: NNAR(IJ) = 0
+Next J
+Next I
+ICT = 0
+If NS2 = NSD(KS) Or NW2 = NWD(KW) Then ICT = 1
+If KS = NS Or KW = NW Then ICT = 1
+If ICT = 0 Then
+If IDBLK(KSW + NS + 1) > 0 Then NNAR(IJ) = -1
+End If
+End If
+Next KS
+Next KW
+'-------- Node Identification for Side Merging ------
+If NSJ > 0 Then
+For I = 1 To NSJ
+I1 = MERG(I, 1): I2 = MERG(I, 2)
+Call SideDiv(I1, I2, IDIV)
+IA1 = NGCN(I1): IA2 = NGCN(I2)
+IASTP = (IA2 - IA1) / IDIV
+489490
+Chapter 12
+Preprocessing and Postprocessing
+continued
+I1 = MERG(I, 3): I2 = MERG(I, 4)
+Call SideDiv(I1, I2, IDIV)
+IB1 = NGCN(I1): IB2 = NGCN(I2)
+IBSTP = (IB2 - IB1) / IDIV
+IAA = IA1 - IASTP
+For IBB = IB1 To IB2 Step IBSTP
+IAA = IAA + IASTP
+If IBB = IAA Then NNAR(IAA) = -1 Else NNAR(IBB) = IAA
+Next IBB
+Next I
+End If
+'---------- Final Node Numbers in the Array --------
+NODE = 0
+For I = 1 To NNT
+If NNAR(I) > 0 Then
+II = NNAR(I): NNAR(I) = NNAR(II)
+ElseIf NNAR(I) < 0 Then
+NODE = NODE + 1: NNAR(I) = NODE
+End If
+Next I
+End Sub
+Private Sub SideDiv(I1, I2, IDIV)
+'=========== Number of Divisions for Side I1,I2 ===========
+IMIN = I1: IMAX = I2
+If IMIN > I2 Then
+IMIN = I2
+IMAX = I1
+End If
+If (IMAX - IMIN) = 1 Then
+IDIV = NGCN(IMAX) - NGCN(IMIN)
+Else
+IDIV = (NGCN(IMAX) - NGCN(IMIN)) / NNS
+End If
+End Sub
+‘==================================================================
+‘===== COORDINATES AND CONNECTIVITY ======
+Private Sub CoordConnect()
+'------------ Nodal Coordinates ---------------
+NN = NODE: NELM = 0
+ReDim X(NN, 2), XP(8, 2), NOC(2 * NNT, NEN), MAT(2 * NNT)
+For KW = 1 To NW
+For KS = 1 To NS
+KSW = NS * (KW - 1) + KS
+If IDBLK(KSW) <> 0 Then
+'--------- Extraction of Block Data ----------
+NODW = NGCN(KSW + KW - 1) - NNS - 1
+For JW = 1 To NWD(KW) + 1
+ETA = -1 + 2 * (JW - 1) / NWD(KW)
+NODW = NODW + NNS: NODS = NODW
+For JS = 1 To NSD(KS) + 1
+XI = -1 + 2 * (JS - 1) / NSD(KS)Program Listing
+NODS = NODS + 1: NODE = NNAR(NODS)
+Call BlockXY(KW, KSW)
+Call Shape(XI, ETA)
+For J = 1 To 2
+C1 = 0
+For I = 1 To 8
+C1 = C1 + SH(I) * XP(I, J)
+Next I
+X(NODE, J) = C1
+Next J
+'----------------- Connectivity ----------------
+If JS <> NSD(KS) + 1 And JW <> NWD(KW) + 1 Then
+N1 = NODE: N2 = NNAR(NODS + 1)
+N4 = NNAR(NODS + NNS): N3 = NNAR(NODS + NNS + 1)
+NELM = NELM + 1
+If NEN = 3 Then
+'------------- Triangular Elements ------------
+NOC(NELM, 1) = N1: NOC(NELM, 2) = N2
+NOC(NELM, 3) = N3: MAT(NELM) = IDBLK(KSW)
+NELM = NELM + 1: NOC(NELM, 1) = N3: NOC(NELM, 2) = N4
+NOC(NELM, 3) = N1: MAT(NELM) = IDBLK(KSW)
+Else
+'------------- Quadrilateral Elements ----------
+NOC(NELM, 1) = N1: NOC(NELM, 2) = N2
+MAT(NELM) = IDBLK(KSW)
+NOC(NELM, 3) = N3: NOC(NELM, 4) = N4
+End If
+End If
+Next JS
+Next JW
+End If
+Next KS
+Next KW
+NE = NELM
+If NEN = 3 Then
+'--------- Readjustment for Triangle Connectivity ----------
+NE2 = NE / 2
+For I = 1 To NE2
+I1 = 2 * I - 1: N1 = NOC(I1, 1): N2 = NOC(I1, 2)
+N3 = NOC(I1, 3): N4 = NOC(2 * I, 2)
+X13 = X(N1, 1) - X(N3, 1): Y13 = X(N1, 2) - X(N3, 2)
+X24 = X(N2, 1) - X(N4, 1): Y24 = X(N2, 2) - X(N4, 2)
+If (X13 * X13 + Y13 * Y13) > 1.1 * (X24 * X24 + Y24 * Y24) Then
+NOC(I1, 3) = N4: NOC(2 * I, 3) = N2
+End If
+Next I
+End If
+End Sub
+Private Sub BlockXY(KW, KSW)
+'====== Coordinates of 8-Nodes of the Block ======
+N1 = KSW + KW - 1
+XP(1, 1) = XB(N1, 1): XP(1, 2) = XB(N1, 2)
+XP(3, 1) = XB(N1 + 1, 1): XP(3, 2) = XB(N1 + 1, 2)
+XP(5, 1) = XB(N1 + NS + 2, 1): XP(5, 2) = XB(N1 + NS + 2, 2)
+XP(7, 1) = XB(N1 + NS + 1, 1): XP(7, 2) = XB(N1 + NS + 1, 2)
+491492
+Chapter 12
+Preprocessing and Postprocessing
+XP(2, 1) = SR(KSW, 1): XP(2, 2) = SR(KSW, 2)
+XP(6, 1) = SR(KSW + NS, 1): XP(6, 2) = SR(KSW + NS, 2)
+XP(8, 1) = WR(N1, 1): XP(8, 2) = WR(N1, 2)
+XP(4, 1) = WR(N1 + 1, 1): XP(4, 2) = WR(N1 + 1, 2)
+End Sub
+Private Sub Shape(XI, ETA)
+'============== Shape Functions ================
+SH(1) = -(1 - XI) * (1 - ETA) * (1 + XI + ETA) / 4
+SH(2) = (1 - XI * XI) * (1 - ETA) / 2
+SH(3) = -(1 + XI) * (1 - ETA) * (1 - XI + ETA) / 4
+SH(4) = (1 - ETA * ETA) * (1 + XI) / 2
+SH(5) = -(1 + XI) * (1 + ETA) * (1 - XI - ETA) / 4
+SH(6) = (1 - XI * XI) * (1 + ETA) / 2
+SH(7) = -(1 - XI) * (1 + ETA) * (1 + XI - ETA) / 4
+SH(8) = (1 - ETA * ETA) * (1 - XI) / 2
+End Sub
+‘=============
+OUTPUT
+================
+Private Sub Output()
+'===== Output from this program is input for FE programs after some changes
+File2 = InputBox("Output File d:\dir\fileName.ext", "Name of File")
+Open File2 For Output As #2
+Print #2, "Program MESHGEN - CHANDRUPATLA & BELEGUNDU"
+Print #2, Title
+NDIM = 2: NDN = 2
+Print #2, "NN NE NM NDIM NEN NDN"
+Print #2, NN; NE; NM; NDIM; NEN; NDN
+Print #2, "ND
+NL
+NMPC"
+Print #2, ND; NL; NMPC
+Print #2, "Node#
+X
+Y"
+For I = 1 To NN
+Print #2, I;
+For J = 1 To NDIM
+Print #2, X(I, J);
+Next J
+Print #2,
+Next I
+Print #2, "Elem# Node1 Node2 Node3";
+If NEN = 3 Then Print #2, " Material#"
+If NEN = 4 Then Print #2, " Node4 Material#"
+For I = 1 To NE
+Print #2, I;
+For J = 1 To NEN
+Print #2, NOC(I, J);
+Next J
+Print #2, MAT(I)
+Next I
+Close #2
+picBox.Print "Data has been stored in the file "; File2
+End SubProgram Listing
+'************************************************
+'*
+PROGRAM PLOT2D
+*
+'*
+PLOTS 2D MESHES - TRIANGLES AND QUADS
+*
+'*
+(c) T.R.CHANDRUPATLA & A.D.BELEGUNDU
+*
+'************************************************
+‘========
+PROGRAM MAIN
+========
+Private Sub cmdPlot_Click()
+Call InputData
+Call DrawLimits(XMIN, YMIN, XMAX, YMAX)
+Call DrawElements
+cmdPlot.Enabled = False
+cmdULeft.Enabled = True
+cmdURight.Enabled = True
+cmdLLeft.Enabled = True
+cmdLRight.Enabled = True
+End Sub
+‘===========================================
+‘=====
+INPUT DATA FROM FE INPUT FILE
+=====
+Private Sub InputData()
+File1 = InputBox("Input File d:\dir\fileName", "Name of File")
+Open File1 For Input As #1
+Line Input #1, Dummy: Input #1, Title
+Line Input #1, Dummy: Input #1, NN, NE, NM, NDIM, NEN, NDN
+Line Input #1, Dummy: Input #1, ND, NL, NMPC
+If NDIM <> 2 Then
+picBox.Print " THE PROGRAM SUPPORTS TWO DIMENSIONAL PLOTS ONLY"
+picBox.Print "THE DIMENSION OF THE DATA IS "; NDIM
+End
+End If
+ReDim X(NN, NDIM), NOC(NE, NEN)
+'============= READ DATA ===============
+Line Input #1, Dummy
+For I = 1 To NN: Input #1, N: For J = 1 To NDIM
+Input #1, X(N, J): Next J: Next I
+Line Input #1, Dummy
+For I = 1 To NE: Input #1, N: For J = 1 To NEN
+Input #1, NOC(N, J): Next J: Input #1, NTMP
+For J = 1 To 2: Input #1, C: Next J
+Next I
+Close #1
+End Sub
+‘================================================
+‘========
+DETERMINE DRAW LIMITS
+========
+Private Sub DrawLimits(XMIN, YMIN, XMAX, YMAX)
+XMAX = X(1, 1): YMAX = X(1, 2): XMIN = X(1, 1): YMIN = X(1, 2)
+For I = 2 To NN
+If XMAX < X(I, 1) Then XMAX = X(I, 1)
+If YMAX < X(I, 2) Then YMAX = X(I, 2)
+If XMIN > X(I, 1) Then XMIN = X(I, 1)
+If YMIN > X(I, 2) Then YMIN = X(I, 2)
+493494
+Chapter 12
+Preprocessing and Postprocessing
+continued
+Next I
+XL = (XMAX - XMIN): YL = (YMAX - YMIN)
+A = XL: If A < YL Then A = YL
+XB = 0.5 * (XMIN + XMAX)
+YB = 0.5 * (YMIN + YMAX)
+XMIN = XB - 0.55 * A: XMAX = XB + 0.55 * A
+YMIN = YB - 0.55 * A: YMAX = YB + 0.55 * A
+XL = XMIN: YL = YMIN: XH = XMAX: YH = YMAX
+XOL = XL: YOL = YL: XOH = XH: YOH = YH
+End Sub
+‘=========================================================
+‘========
+DRAW ELEMENTS
+========
+Private Sub DrawElements()
+'=========== Draw Elements ================
+picBox.Scale (XL, YH)-(XH, YL)
+picBox.Cls
+For IE = 1 To NE
+For II = 1 To NEN
+I2 = II + 1
+If II = NEN Then I2 = 1
+X1 = X(NOC(IE, II), 1): Y1 = X(NOC(IE, II), 2)
+X2 = X(NOC(IE, I2), 1): Y2 = X(NOC(IE, I2), 2)
+picBox.Line (X1, Y1)-(X2, Y2), QBColor(1)
+If NEN = 2 Then Exit For
+Next II
+Next IE
+cmdNode.Enabled = True
+End Sub
+‘===================================================
+'*****
+PROGRAM BESTFIT
+*****
+'*
+BEST FIT PROGRAM
+*
+'*
+FOR 3-NODED TRIANGLES
+*
+'* T.R.Chandrupatla and A.D.Belegundu *
+'***************************************
+‘========
+PROGRAM MAIN
+========
+Private Sub cmdStart_Click()
+Call InputData
+Call Bandwidth
+Call Stiffness
+Call BandSolver
+Call Output
+cmdView.Enabled = True
+cmdStart.Enabled = False
+End Sub
+‘============================================Program Listing
+‘=====
+STIFFNESS FOR INTERPOLATION
+=====
+Private Sub Stiffness()
+ReDim S(NQ, NBW), F(NQ)
+'--- Global Stiffness Matrix
+For N = 1 To NE
+Call ElemStiff(N)
+For II = 1 To 3
+NR = NOC(N, II): F(NR) = F(NR) + FE(II)
+For JJ = 1 To 3
+NC = NOC(N, JJ) - NR + 1
+If NC > 0 Then
+S(NR, NC) = S(NR, NC) + SE(II, JJ)
+End If
+Next JJ
+Next II
+Next N
+picBox.Print "Stiffness Formation completed..."
+End Sub
+Private Sub ElemStiff(N)
+'--- Element Stiffness Formation
+I1 = NOC(N, 1): I2 = NOC(N, 2): I3 = NOC(N, 3)
+X1 = X(I1, 1): Y1 = X(I1, 2)
+X2 = X(I2, 1): Y2 = X(I2, 2)
+X3 = X(I3, 1): Y3 = X(I3, 2)
+X21 = X2 - X1: X32 = X3 - X2: X13 = X1 - X3
+Y12 = Y1 - Y2: Y23 = Y2 - Y3: Y31 = Y3 - Y1
+DJ = X13 * Y23 - X32 * Y31
+'DETERMINANT OF JACOBIAN
+AE = Abs(DJ) / 24
+SE(1, 1) = 2 * AE: SE(1, 2) = AE: SE(1, 3) = AE
+SE(2, 1) = AE: SE(2, 2) = 2 * AE: SE(2, 3) = AE
+SE(3, 1) = AE: SE(3, 2) = AE: SE(3, 3) = 2 * AE
+A1 = FS(N) * Abs(DJ) / 6
+FE(1) = A1: FE(2) = A1: FE(3) = A1
+End Sub
+‘=======================================================
+'********
+CONTOURA
+**********
+'*
+CONTOUR PLOTTING - CONTOUR LINES
+*
+'*
+FOR 2D TRIANGLES AND QUADRILATERALS
+*
+'*
+T.R.Chandrupatla and A.D.Belegundu
+*
+'*********************************************
+‘=======
+PROGRAM MAIN
+=======
+Private Sub cmdPlot_Click()
+Call InputData
+Call FindBoundary
+Call DrawLimits(XMIN, YMIN, XMAX, YMAX)
+Call DrawBoundary
+Call DrawContours
+End Sub
+‘===========================================
+495496
+Chapter 12
+Preprocessing and Postprocessing
+‘=====
+INPUT DATA FROM FILES
+=====
+Private Sub InputData()
+File1 = InputBox("FE Input File", "d:\dir\Name of File")
+File2 = InputBox("Contour Data File", "d:\dir\Name of File")
+Open File1 For Input As #1
+Line Input #1, D$: Input #1, Title$
+Line Input #1, D$: Input #1, NN, NE, NM, NDIM, NEN, NDN
+Line Input #1, D$: Input #1, ND, NL, NMPC
+If NDIM <> 2 Or NEN < 3 Or NEN > 4 Then
+picBox.Print "This program supports triangular and quadrilateral"
+picBox.Print "Elements only."
+End
+End If
+ReDim X(NN, NDIM), NOC(NE, NEN), FF(NN), NCON(NE, NEN)
+ReDim XX(3), YY(3), U(3), IC(10), ID(10)
+'============= COLOR DATA ===============
+IC(1) = 13: IC(2) = 5: IC(3) = 9: IC(4) = 1: IC(5) = 2
+IC(6) = 10: IC(7) = 14: IC(8) = 6: IC(9) = 4: IC(10) = 12
+For I = 1 To 10: ID(I) = 0: Next I
+'============= READ DATA ===============
+'----- Coordinates
+Line Input #1, D$
+For I = 1 To NN
+Input #1, n
+For J = 1 To NDIM:Input #1, X(n, J): Next J
+Next I
+'----- Connectivity
+Line Input #1, D$
+For I = 1 To NE
+Input #1, n: For J = 1 To NEN
+Input #1, NOC(n, J): Next J: Input #1, NTMP
+For J = 1 To 2: Input #1, C: Next J: Next I
+Close #1
+Open File2 For Input As #2
+'----- Nodal Values
+Line Input #2, D$
+For I = 1 To NN
+Input #2, FF(I)
+Next I
+Close #2
+End Sub
+‘=====
+FIND BOUNDARY LINES
+=====
+Private Sub FindBoundary()
+'============= Find Boundary Lines ===============
+'Edges defined by nodes in NOC to nodes in NCON
+For IE = 1 To NE
+For I = 1 To NEN
+I1 = I + 1: If I1 > NEN Then I1 = 1
+NCON(IE, I) = NOC(IE, I1)
+Next I
+Next IE
+For IE = 1 To NEProgram Listing
+For I = 1 To NEN
+I1 = NCON(IE, I): I2 = NOC(IE, I)
+INDX = 0
+For JE = IE + 1 To NE
+For J = 1 To NEN
+If NCON(JE, J) <> 0 Then
+If I1 = NCON(JE, J) Or I1 = NOC(JE, J) Then
+If I2 = NCON(JE, J) Or I2 = NOC(JE, J) Then
+NCON(JE, J) = 0: INDX = INDX + 1
+End If
+End If
+End If
+Next J
+Next JE
+If INDX > 0 Then NCON(IE, I) = 0
+Next I
+Next IE
+End Sub
+‘=====================================================
+‘========
+DRAW BOUNARY
+========
+Private Sub DrawBoundary()
+picBox.Scale (XL, YH)-(XH, YL)
+picBox.Cls
+'============ Draw Boundary ==============
+For IE = 1 To NE
+For I = 1 To NEN
+If NCON(IE, I) > 0 Then
+I1 = NCON(IE, I): I2 = NOC(IE, I)
+picBox.Line (X(I1, 1), X(I1, 2))-(X(I2, 1), X(I2, 2))
+End If
+Next I
+Next IE
+End Sub
+‘========
+DRAW CONTOUR LINES
+========
+Private Sub DrawContours()
+'=========== Contour Plotting ===========
+For IE = 1 To NE
+If NEN = 3 Then
+For IEN = 1 To NEN
+IEE = NOC(IE, IEN)
+U(IEN) = FF(IEE)
+XX(IEN) = X(IEE, 1)
+YY(IEN) = X(IEE, 2)
+Next IEN
+Call ElementPlot
+ElseIf NEN = 4 Then
+XB = 0: YB = 0: UB = 0
+For IT = 1 To NEN
+NIT = NOC(IE, IT)
+XB = XB + 0.25 * X(NIT, 1)
+YB = YB + 0.25 * X(NIT, 2)
+UB = UB + 0.25 * FF(NIT)
+Next IT
+497498
+Chapter 12
+Preprocessing and Postprocessing
+continued
+For IT = 1 To NEN
+IT1 = IT + 1: If IT1 > 4 Then IT1 = 1
+XX(1) = XB: YY(1) = YB: U(1) = UB
+NIE = NOC(IE, IT)
+XX(2) = X(NIE, 1): YY(2) = X(NIE, 2): U(2) = FF(NIE)
+NIE = NOC(IE, IT1)
+XX(3) = X(NIE, 1): YY(3) = X(NIE, 2): U(3) = FF(NIE)
+Call ElementPlot
+Next IT
+Else
+Print "NUMBER OF ELEMENT NODES > 4 IS NOT SUPPORTED"
+End
+End If
+Next IE
+For I = 1 To 10: ID(I) = 0: Next I
+End SubPrivate Sub ElementPlot()
+'THREE POINTS IN ASCENDING ORDER
+For I = 1 To 2
+C = U(I): II = I
+For J = I + 1 To 3
+If C > U(J) Then
+C = U(J): II = J
+End If
+Next J
+U(II) = U(I): U(I) = C
+C1 = XX(II): XX(II) = XX(I): XX(I) = C1
+C1 = YY(II): YY(II) = YY(I): YY(I) = C1
+Next I
+SU = (U(1) - FMIN) / STP
+II = Int(SU)
+If II <= SU Then II = II + 1
+UT = FMIN + II * STP
+Do While UT <= U(3)
+ICO = IC(II)
+X1 = ((U(3) - UT) * XX(1) + (UT - U(1)) * XX(3)) / (U(3) - U(1))
+Y1 = ((U(3) - UT) * YY(1) + (UT - U(1)) * YY(3)) / (U(3) - U(1))
+L = 1: If UT > U(2) Then L = 3
+X2 = ((U(L) - UT) * XX(2) + (UT - U(2)) * XX(L)) / (U(L) - U(2))
+Y2 = ((U(L) - UT) * YY(2) + (UT - U(2)) * YY(L)) / (U(L) - U(2))
+picBox.Line (X1, Y1)-(X2, Y2), QBColor(ICO)
+If ID(II) = 0 Then
+picBox.CurrentX = X1: picBox.CurrentY = Y1
+If (XL < X1 And X1 < XH) And (YL < Y1 And Y1 < YH) Then
+picBox.Print II
+ID(II) = 1
+End If
+End If
+UT = UT + STP: II = II + 1
+Loop
+End Sub
